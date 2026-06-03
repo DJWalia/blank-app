@@ -34,7 +34,7 @@ def get_description_from_web_url_bill(web_url):
         bill_num = parts[idx + 3]      
         congress_num = "".join(filter(str.isdigit, raw_congress))
     except (ValueError, IndexError):
-        return "Error: Invalid Congress.gov bill web URL format."
+        return f"Error: Invalid Congress.gov bill web URL format parsing target: {web_url}"
     
     if raw_type in ["house-bill", "hr"]:
         api_type = "hr"
@@ -43,7 +43,7 @@ def get_description_from_web_url_bill(web_url):
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    api_url = f"https://congress.gov/{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -52,9 +52,10 @@ def get_description_from_web_url_bill(web_url):
         data = response.json()
         summaries_list = data.get("summaries", [])
         
-        if summaries_list:
-            if isinstance(summaries_list, list):
-                return summaries_list[0].get("text", "No summary text found.")
+        if summaries_list and isinstance(summaries_list, list):
+            # Target explicit first element block inside list
+            return summaries_list[0].get("text", "No summary text found.")
+        elif isinstance(summaries_list, dict):
             return summaries_list.get("text", "No summary text found.")
         else:
             return "No summaries available for this bill yet."
@@ -72,11 +73,11 @@ def get_description_from_web_url_amendment(web_url):
         amendment_num = parts[idx + 3] 
         congress_num = "".join(filter(str.isdigit, raw_congress))
     except (ValueError, IndexError):
-        return "Error: Invalid Congress.gov amendment web URL format."
+        return f"Error: Invalid Congress.gov amendment web URL format parsing target: {web_url}"
     
-    if raw_type == "house-amendment":
+    if raw_type in ["house-amendment", "hamdt"]:
         api_type = "hamdt"
-    elif raw_type == "senate-amendment":
+    elif raw_type in ["senate-amendment", "samdt"]:
         api_type = "samdt"
     else:
         api_type = f"{raw_type.lower()}amdt"
@@ -112,22 +113,27 @@ def get_bill_name_house(type, congress, session, rollCallVoteNumber):
 
     bill_number = f"{vote_start}.{vote_end}"
     
+    # Fix: Reconstruct actual Web URLs instead of sending the internal API strings down to parser
     if 'amendmentNumber' in data.get('houseRollCallVote', {}):
         amendment_start = data.get('houseRollCallVote', {}).get('amendmentType')
         amendment_end = data.get('houseRollCallVote', {}).get('amendmentNumber')
         amendment_number = f"{amendment_start}.{amendment_end}"
         full_bill_number = f"{amendment_number} to {bill_number}"
         final_bill_number = re.sub(r"\bH(?=[A-Z])", "H.", full_bill_number)
-        bill_url = data.get('houseRollCallVote', {}).get('legislationUrl')
-        description = get_description_from_web_url_amendment(bill_url)
-        return final_bill_number, description, bill_url
+        
+        # Build direct clean consumer web target url
+        web_amend_type = "house-amendment" if "H" in str(amendment_start) else "senate-amendment"
+        rebuilt_web_url = f"https://www.congress.gov/amendment/{congress}th-congress/{web_amend_type}/{amendment_end}"
+        description = get_description_from_web_url_amendment(rebuilt_web_url)
+        return final_bill_number, description, rebuilt_web_url
     
     elif bill_number:
         final_bill_number = re.sub(r"\bH(?=[A-Z])", "H.", bill_number)
-        bill_url = data.get('houseRollCallVote', {}).get('legislationUrl')
-        description = get_description_from_web_url_bill(bill_url)
+        web_bill_type = "house-bill" if "H" in str(vote_start) else "senate-bill"
+        rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_bill_type}/{vote_end}"
+        description = get_description_from_web_url_bill(rebuilt_web_url)
         description_clean = cleanup_text(description)
-        return final_bill_number, description_clean, bill_url
+        return final_bill_number, description_clean, rebuilt_web_url
     else:
         return f"House Vote #{rollCallVoteNumber}", "Could not isolate target bill components.", ""
 
@@ -142,31 +148,41 @@ def get_bill_name_senate_direct(congress, bill_type, bill_number):
         api_type = "s"
         display_prefix = "S."
 
-    generated_web_url = f"https://congress.gov/{congress}th-congress/{bill_type}/{bill_number}"
+    generated_web_url = f"https://congress.gov{congress}th-congress/{bill_type}/{bill_number}"
     description = get_description_from_web_url_bill(generated_web_url)
     description_clean = cleanup_text(description)
     
     return f"{display_prefix} {bill_number}", description_clean, generated_web_url
 
-# Cache data ensures processing runs exactly once per distinct file upload
+def get_amendment_direct(congress, amend_type, amend_number):
+    if "house" in amend_type:
+        display_prefix = "H.Amdt."
+    elif "senate" in amend_type:
+        display_prefix = "S.Amdt."
+    else:
+        display_prefix = "S.Amdt."
+
+    generated_web_url = f"https://www.congress.gov/amendment/{congress}th-congress/{amend_type}/{amend_number}"
+    description = get_description_from_web_url_amendment(generated_web_url)
+    
+    return f"{display_prefix} {amend_number}", description, generated_web_url
+
+# Cache data engine step logic
 @st.cache_data(show_spinner=False)
 def process_congress_csv(file_contents):
-    # Convert file bytes back into a DataFrame
     df = pandas.read_csv(io.BytesIO(file_contents), skiprows=3)
     
     if "URL" not in df.columns:
         return None, "Error: Could not find a 'URL' column. Check formatting."
         
     names, descriptions, urls = [], [], []
-    total_rows = len(df)
     
-    # Simple container updates can break inside cached steps, 
-    # so we run processing calculations silently and cleanly.
     for index, row in df.iterrows():
         url_val = str(row["URL"]).strip()
         parts = url_val.split('/')
         
         try:
+            # Route 1: Modern pattern: /votes/house/118-2/517
             if "votes" in parts and "house" in parts:
                 idx = parts.index("house")
                 hyphen_mix = parts[idx+1]
@@ -177,9 +193,11 @@ def process_congress_csv(file_contents):
                     congress_str = "".join(filter(str.isdigit, hyphen_mix))
                     session_str = "1"
                     
+                # Fix: Extract raw string out of array layout wrapper using [0]
                 vote_num = parts[idx+2].split('?')[0]
                 name, desc, b_url = get_bill_name_house("house-vote", congress_str, session_str, vote_num)
                 
+            # Route 2: Base layout bill paths: /bill/119th-congress/senate-bill/4664
             elif "bill" in parts:
                 idx = parts.index("bill")
                 congress_str = "".join(filter(str.isdigit, parts[idx+1]))
@@ -187,6 +205,15 @@ def process_congress_csv(file_contents):
                 vote_num = parts[idx+3].split('?')[0]
                 
                 name, desc, b_url = get_bill_name_senate_direct(congress_str, bill_type_str, vote_num)
+                
+            # Route 3: Amendment path processing: /amendment/119th-congress/senate-amendment/5350
+            elif "amendment" in parts:
+                idx = parts.index("amendment")
+                congress_str = "".join(filter(str.isdigit, parts[idx+1]))
+                amend_type_str = parts[idx+2]
+                amend_num = parts[idx+3].split('?')[0]
+                
+                name, desc, b_url = get_amendment_direct(congress_str, amend_type_str, amend_num)
                 
             else:
                 name, desc, b_url = "N/A", "URL format not matching criteria", ""
@@ -203,28 +230,20 @@ def process_congress_csv(file_contents):
     df["URL_Generated"] = urls
     return df, "Success"
 
-# Execution Logic Core
+# Presentation Execution Loop Step
 if uploaded_file is not None:
-    # Read bytes to pass safely into our cached function engine
     file_bytes = uploaded_file.read()
     
-    with st.spinner("Processing document data..."):
+    with st.spinner("Processing document data... (This runs once and will be cached)"):
         processed_df, status_msg = process_congress_csv(file_bytes)
         
     if processed_df is None:
         st.error(status_msg)
     else:
         st.success("Processing complete!")
-        
-        # Prepare file layout buffers cleanly 
+        st.dataframe(processed_df.head())
+
         csv_buffer = io.StringIO()
         processed_df.to_csv(csv_buffer, index=False)
         csv_bytes = csv_buffer.getvalue().encode('utf-8')
-        
-        # Click action now acts instantaneously without re-triggering the loop!
-        st.download_button(
-            label="📥 Download Appended CSV Spreadsheet",
-            data=csv_bytes,
-            file_name="congress_votes_expanded.csv",
-            mime="text/csv"
-        )
+        st.download_button(label="📥 Download Appended CSV Spreadsheet",data=csv_bytes,file_name="congress_votes_expanded.csv",mime="text/csv")
