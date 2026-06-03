@@ -22,8 +22,6 @@ def cleanup_text(html_text):
     return clean_text.strip()
 
 def get_description_from_web_url_bill(web_url):
-    st.write('hi')
-    
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
     
@@ -48,7 +46,7 @@ def get_description_from_web_url_bill(web_url):
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    api_url = f"https://congress.gov/{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -60,7 +58,7 @@ def get_description_from_web_url_bill(web_url):
         
         if summaries_list:
             if isinstance(summaries_list, list):
-                return summaries_list[0].get("text", "No summary text found.")
+                return summaries_list.get("text", "No summary text found.")
             return summaries_list.get("text", "No summary text found.")
         else:
             return "No summaries available for this bill yet."
@@ -69,8 +67,6 @@ def get_description_from_web_url_bill(web_url):
         return f"API Request failed: {e}"
     
 def get_description_from_web_url_amendment(web_url):
-    st.write('hi, this is an amendment')
-    
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
     
@@ -91,7 +87,7 @@ def get_description_from_web_url_amendment(web_url):
     else:
         api_type = f"{raw_type.lower()}amdt"
 
-    api_url = f"https://congress.gov/{congress_num}/{api_type}/{amendment_num}"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
     params = {"api_key": token, "format": "json"}
 
     try:
