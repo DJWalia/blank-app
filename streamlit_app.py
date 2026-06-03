@@ -223,8 +223,6 @@ if uploaded_file is not None:
             st.success("Processing complete!")
 
         if st.session_state.processed_df is not None:
-            st.write("### Processed Data Preview")
-            st.dataframe(st.session_state.processed_df)
             
             st.download_button(
                 label="Download Processed CSV",
