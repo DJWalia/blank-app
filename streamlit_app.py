@@ -22,7 +22,6 @@ def cleanup_text(html_text):
     return clean_text.strip()
 
 def get_description_from_web_url_bill(web_url):
-    st.write('hi')
     
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
@@ -65,7 +64,6 @@ def get_description_from_web_url_bill(web_url):
         return f"API Request failed: {e}"
     
 def get_description_from_web_url_amendment(web_url):
-    st.write('hi, this is an amendment')
     
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
@@ -160,7 +158,7 @@ def parse_vote_url(url_string):
     except (ValueError, IndexError):
         return None
 
-st.title("Congress.gov Vote Parser")
+st.title("Congress.gov House Legislative Record Vote Details")
 
 if "current_file_name" not in st.session_state:
     st.session_state.current_file_name = None
