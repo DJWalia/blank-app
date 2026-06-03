@@ -7,7 +7,7 @@ import requests
 import re
 import pandas
 
-# Fetch official credentials from application secrets
+# Load API credentials from Streamlit Secrets
 token = st.secrets["api_token"]
 uploaded_file = st.file_uploader("Upload your CSV spreadsheet file from congress.gov", type=["csv"])
 
@@ -25,7 +25,7 @@ def cleanup_text(html_text):
 
 def get_description_from_api_params(congress_num, api_type, bill_num):
     """ Queries primary bill summary object arrays from official v3 endpoint. """
-    api_url = f"https://api.congress.gov/v3/bill/{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
     try:
         response = requests.get(api_url, params=params)
@@ -33,6 +33,7 @@ def get_description_from_api_params(congress_num, api_type, bill_num):
         data = response.json()
         summaries_list = data.get("summaries", [])
         if summaries_list and isinstance(summaries_list, list):
+            # Safe text retrieval from the first entry of the summary array list
             return summaries_list[0].get("text", "No summary text found.")
         elif isinstance(summaries_list, dict):
             return summaries_list.get("text", "No summary text found.")
@@ -54,10 +55,10 @@ def get_amendment_description_from_api_params(congress_num, api_type, amendment_
 
 def get_bill_name_house(congress, session, rollCallVoteNumber):
     """
-    Processes House Vote endpoints. Correctly parses response bodies to handle
-    metadata resolution dynamically when mapping roll call numbers.
+    Processes House Vote endpoints and queries the related bill summary data 
+    from the target legislation block instead of a generic text fallback.
     """
-    base_url = "https://api.congress.gov/v3"
+    base_url = "https://congress.gov"
     url = f"{base_url}/house-vote/{str(congress)}/{str(session)}/{str(rollCallVoteNumber)}?format=json&api_key={token}"
     headers = {"Accept": "application/json"}
     try:
@@ -65,42 +66,47 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
         response.raise_for_status()
         data = response.json()
     except Exception as e:
-        # Graceful fallback capture to prevent system lockouts
         return f"House Vote #{rollCallVoteNumber}", f"API Request failed: {str(e)}", ""
 
     vote_obj = data.get('houseRollCallVote', {})
-    
-    # Isolate summary description natively mapped inside the roll call item itself
-    vote_desc = vote_obj.get('voteDescription') or vote_obj.get('issue') or vote_obj.get('question', '')
-    if not vote_desc:
-        vote_desc = "House Roll Call Vote tracked from active index logs."
-
     vote_start = vote_obj.get('legislationType')
     vote_end = vote_obj.get('legislationNumber')
     
+    # Process if the vote directly references a legislative bill mapping
     if vote_start and vote_end:
         bill_number = f"{vote_start}.{vote_end}"
         final_bill_number = re.sub(r"\bH(?=[A-Z])", "H.", bill_number)
-        web_bill_type = "house-bill" if "H" in str(vote_start) else "senate-bill"
-        rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_bill_type}/{vote_end}"
-        return final_bill_number, cleanup_text(vote_desc), rebuilt_web_url
+        api_bill_type = "hr" if "H" in str(vote_start).upper() else "s"
+        web_bill_type = "house-bill" if "H" in str(vote_start).upper() else "senate-bill"
         
+        # Build valid consumer link layout
+        rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_bill_type}/{vote_end}"
+        description = get_description_from_api_params(congress, api_bill_type, vote_end)
+        return final_bill_number, cleanup_text(description), rebuilt_web_url
+        
+    # Process if the vote directly targets an amendment attachment layout
     elif 'amendmentNumber' in vote_obj:
         amendment_start = vote_obj.get('amendmentType')
         amendment_end = vote_obj.get('amendmentNumber')
         amendment_number = f"{amendment_start}.{amendment_end}"
         final_amend_number = re.sub(r"\bH(?=[A-Z])", "H.", amendment_number)
-        web_amend_type = "house-amendment" if "H" in str(amendment_start) else "senate-amendment"
+        
+        api_amend_type = "hamdt" if "H" in str(amendment_start).upper() else "samdt"
+        web_amend_type = "house-amendment" if "H" in str(amendment_start).upper() else "senate-amendment"
         rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_amend_type}/{amendment_end}"
-        return final_amend_number, cleanup_text(vote_desc), rebuilt_web_url
+        description = get_amendment_description_from_api_params(congress, api_amend_type, amendment_end)
+        return final_amend_number, description, rebuilt_web_url
         
     else:
+        # Fallback tracking address when structural fields remain empty
         fallback_url = f"https://congress.gov{congress}-{session}/{rollCallVoteNumber}"
+        vote_desc = vote_obj.get('voteDescription') or vote_obj.get('issue') or "House Roll Call Vote Record."
         return f"House Vote #{rollCallVoteNumber}", cleanup_text(vote_desc), fallback_url
 
 def get_bill_name_senate_direct(congress, bill_type, bill_number):
     """ Resolves and structures pure legislative bill URL rows. """
-    if "house" in bill_type or bill_type == "hr":
+    bill_type_clean = str(bill_type).lower()
+    if "house" in bill_type_clean or bill_type_clean == "hr":
         api_type = "hr"
         display_prefix = "H.R."
         web_type = "house-bill"
@@ -115,7 +121,8 @@ def get_bill_name_senate_direct(congress, bill_type, bill_number):
 
 def get_amendment_direct(congress, amend_type, amend_number):
     """ Resolves and structures direct legislative amendment URL rows. """
-    if "house" in amend_type or amend_type == "hamdt":
+    amend_type_clean = str(amend_type).lower()
+    if "house" in amend_type_clean or amend_type_clean == "hamdt":
         api_type = "hamdt"
         display_prefix = "H.Amdt."
         web_type = "house-amendment"
@@ -139,6 +146,7 @@ def process_congress_csv(file_contents):
         url_val = str(row["URL"]).strip()
         url_val = re.sub(r'https?://(?:www\.)?congress\.gov/?', '', url_val)
         
+        # Regex groupings match string text strictly to bypass nested list extraction crashes
         match_vote = re.search(r'votes/house/(\d+)-(\d+)/(\d+)', url_val)
         match_bill = re.search(r'bill/(\d+)[a-z]*-congress/(house-bill|senate-bill|hr|s)/(\d+)', url_val)
         match_amend = re.search(r'amendment/(\d+)[a-z]*-congress/(house-amendment|senate-amendment|hamdt|samdt)/(\d+)', url_val)
@@ -147,19 +155,18 @@ def process_congress_csv(file_contents):
             if match_vote:
                 congress_str = match_vote.group(1)
                 session_str = match_vote.group(2)
-                # Fix: Explicit string conversion to scrub out Python array slicing lists
-                vote_num = match_vote.group(3).split('?')[0]
-                name, desc, b_url = get_bill_name_house(congress_str, session_str, vote_num)
+                vote_num_str = match_vote.group(3) # Fix: Clean string text extraction instead of list split arrays
+                name, desc, b_url = get_bill_name_house(congress_str, session_str, vote_num_str)
             elif match_bill:
                 congress_str = match_bill.group(1)
                 bill_type_str = match_bill.group(2)
-                vote_num = match_bill.group(3).split('?')[0]
-                name, desc, b_url = get_bill_name_senate_direct(congress_str, bill_type_str, vote_num)
+                vote_num_str = match_bill.group(3)
+                name, desc, b_url = get_bill_name_senate_direct(congress_str, bill_type_str, vote_num_str)
             elif match_amend:
                 congress_str = match_amend.group(1)
                 amend_type_str = match_amend.group(2)
-                amend_num = match_amend.group(3).split('?')[0]
-                name, desc, b_url = get_amendment_direct(congress_str, amend_type_str, amend_num)
+                amend_num_str = match_amend.group(3)
+                name, desc, b_url = get_amendment_direct(congress_str, amend_type_str, amend_num_str)
             else:
                 name, desc, b_url = "N/A", "URL structure didn't match known House/Senate vote patterns", ""
         except Exception as e:
@@ -169,10 +176,10 @@ def process_congress_csv(file_contents):
         descriptions.append(desc)
         urls.append(b_url)
         
-    # Append structured fields strictly ordered sequentially at the end of the file layout
+    # Append structured fields sequentially at the end of the file layout with the renamed label
     df["Name"] = names
     df["Description"] = descriptions
-    df["URL_Generated"] = urls
+    df["Bill URL"] = urls
     return df, "Success"
 
 if uploaded_file is not None:
