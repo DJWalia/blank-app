@@ -48,7 +48,7 @@ def get_description_from_web_url_bill(web_url):
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov/{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -91,7 +91,7 @@ def get_description_from_web_url_amendment(web_url):
     else:
         api_type = f"{raw_type.lower()}amdt"
 
-    api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
+    api_url = f"https://congress.gov/{congress_num}/{api_type}/{amendment_num}"
     params = {"api_key": token, "format": "json"}
 
     try:
