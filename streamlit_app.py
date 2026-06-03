@@ -5,23 +5,18 @@ from typing import Dict, List, Optional
 import streamlit as st
 import requests
 import re
-import pandas as pd  # Added pandas for easy CSV manipulation
+import pandas as pd
 
 token = st.secrets["api_token"]
 
-# --- ORIGINAL FUNCTIONS RESTORED EXACTLY AS PROVIDED ---
-
 def cleanup_text(html_text):
-    # 1. Use regex to extract all text blocks inside <p>...</p> tags
     paragraphs = re.findall(r"<p>(.*?)</p>", html_text)
     
-    # 2. If there are multiple paragraphs, skip the first one (the title block)
     if len(paragraphs) >= 2:
         body_content = " ".join(paragraphs[1:])
     else:
         body_content = html_text
         
-    # 3. Strip out any remaining HTML tags (like <strong>, <a>, etc.)
     clean_text = re.sub(r"<[^>]+>", "", body_content)
     
     return clean_text.strip()
@@ -29,26 +24,19 @@ def cleanup_text(html_text):
 def get_description_from_web_url_bill(web_url):
     st.write('hi')
     
-    # 1. Clear out whitespace and split by forward slashes
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
     
     try:
-        # 2. Pin down the keyword index position ("bill" instead of "amendment")
         idx = parts.index("bill")
-        
-        # 3. Pull adjacent sections
-        raw_congress = parts[idx + 1]  # "118th-congress"
-        raw_type = parts[idx + 2]      # "house-bill"
-        bill_num = parts[idx + 3]      # "10545"
-        
-        # 4. Extract digits to get "118"
+        raw_congress = parts[idx + 1]  
+        raw_type = parts[idx + 2]      
+        bill_num = parts[idx + 3]      
         congress_num = "".join(filter(str.isdigit, raw_congress))
         
     except (ValueError, IndexError):
         return "Error: Invalid Congress.gov bill web URL format."
     
-    # 5. Route the web types to standard lowercase API bill codes
     if raw_type == "house-bill":
         api_type = "hr"
     elif raw_type == "senate-bill":
@@ -56,9 +44,7 @@ def get_description_from_web_url_bill(web_url):
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    # 6. Target the bill's /summaries sub-endpoint
     api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
-    
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -66,13 +52,10 @@ def get_description_from_web_url_bill(web_url):
         response.raise_for_status()
         
         data = response.json()
-        
-        # 7. Drill into the summaries array to find the text payload
         summaries_list = data.get("summaries", [])
         
         if summaries_list:
-            # Grabs the latest available summary text
-            return summaries_list.get("text", "No summary text found.")
+            return summaries_list[0].get("text", "No summary text found.")
         else:
             return "No summaries available for this bill yet."
         
@@ -82,26 +65,19 @@ def get_description_from_web_url_bill(web_url):
 def get_description_from_web_url_amendment(web_url):
     st.write('hi, this is an amendment')
     
-    # 1. Clear out whitespace and split by forward slashes
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
     
     try:
-        # 2. Pin down the keyword index position
         idx = parts.index("amendment")
-        
-        # 3. Pull adjacent sections
-        raw_congress = parts[idx + 1]  # "118th-congress"
-        raw_type = parts[idx + 2]      # "house-amendment"
-        amendment_num = parts[idx + 3] # "90"
-        
-        # 4. Extract digits to get "118"
+        raw_congress = parts[idx + 1]  
+        raw_type = parts[idx + 2]      
+        amendment_num = parts[idx + 3] 
         congress_num = "".join(filter(str.isdigit, raw_congress))
         
     except (ValueError, IndexError):
         return "Error: Invalid Congress.gov amendment web URL format."
     
-    # 5. FIXED: Use LOWERCASE strings for the API codes
     if raw_type == "house-amendment":
         api_type = "hamdt"
     elif raw_type == "senate-amendment":
@@ -109,9 +85,7 @@ def get_description_from_web_url_amendment(web_url):
     else:
         api_type = f"{raw_type.lower()}amdt"
 
-    # 6. Build the path using lowercase api_type
     api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
-    
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -127,7 +101,6 @@ def get_description_from_web_url_amendment(web_url):
 def get_bill_name(type, congress, session, rollCallVoteNumber):
     base_url = "https://congress.gov"
     url = f"{base_url}/{type}/{congress}/{session}/{rollCallVoteNumber}?format=json&api_key={token}"
-    
     headers = {"Accept": "application/json"}
 
     response = requests.get(url, headers=headers)
@@ -159,50 +132,32 @@ def get_bill_name(type, congress, session, rollCallVoteNumber):
         st.write(data)
 
 def get_bill_summary(congress, bill_type, bill_number, api_key):
-    """
-    Fetches summaries for a specific bill from the Congress.gov API.
-    """
     base_url = "https://congress.gov/bill"
     url = f"{base_url}/{congress}/{bill_type}/{bill_number}/summaries?format=json&api_key={api_key}"
-    
-    headers = {
-        "Accept": "application/json"
-    }
+    headers = {"Accept": "application/json"}
     
     response = requests.get(url, headers=headers)
-    
     data = response.json()
     return data.get("summaries", [])
 
-
-# --- HELPER UTILITY FOR PARSING VOTE URL STRING IN THE CSV ---
-
 def parse_vote_url(url_string):
-    """
-    Parses a vote URL like: https://congress.gov
-    Returns: type, congress, session, rollCallVoteNumber
-    """
     if pd.isna(url_string):
         return None
     clean_url = str(url_string).strip().rstrip('/')
     parts = clean_url.split('/')
     try:
         idx = parts.index("votes")
-        vote_type = parts[idx + 1] + "-vote"  # e.g., "house" becomes "house-vote"
-        congress_session = parts[idx + 2]     # "118-2"
-        vote_num = parts[idx + 3]             # "513"
+        vote_type = parts[idx + 1] + "-vote"  
+        congress_session = parts[idx + 2]     
+        vote_num = parts[idx + 3]             
         
         congress, session = congress_session.split('-')
         return vote_type, congress, session, vote_num
     except (ValueError, IndexError):
         return None
 
-
-# --- STREAMLIT AUTOMATION UI ---
-
 st.title("Congress.gov Vote Parser")
 
-# Set up state variables to cache values and prevent duplicate API loops on click events
 if "current_file_name" not in st.session_state:
     st.session_state.current_file_name = None
     st.session_state.processed_df = None
@@ -211,22 +166,17 @@ if "current_file_name" not in st.session_state:
 uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
 if uploaded_file is not None:
-    # Reset tracking registers when a completely new document gets uploaded
     if st.session_state.current_file_name != uploaded_file.name:
         st.session_state.current_file_name = uploaded_file.name
         st.session_state.processed_df = None
         st.session_state.processed_csv_bytes = None
 
-    # Read the CSV document, skipping the first 3 rows
     df = pd.read_csv(uploaded_file, skiprows=3)
-    
-    # Completely drop rows where every single cell is entirely empty
     df = df.dropna(how="all")
     
     if "URL" not in df.columns:
         st.error("Error: The CSV does not contain a column named 'URL'.")
     else:
-        # Run URL operations instantly if the state data cache is empty
         if st.session_state.processed_df is None:
             names = []
             descriptions = []
@@ -244,21 +194,40 @@ if uploaded_file is not None:
                 if parsed:
                     v_type, v_congress, v_session, v_num = parsed
                     try:
-                        # Safety block prevents non-JSON responses or API faults from crashing the script
                         bill_name, bill_desc, api_bill_url = get_bill_name(v_type, v_congress, v_session, v_num)
-                        
                         names.append(bill_name if bill_name else "")
                         descriptions.append(bill_desc if bill_desc else "")
                         urls.append(api_bill_url if api_bill_url else "")
                     except Exception:
-                        # Omit content entirely on broken link instances as requested
                         names.append("")
                         descriptions.append("")
                         urls.append("")
                 else:
-                    # Omit text if the field is missing/malformed but the row itself wasn't completely blank
                     names.append("")
                     descriptions.append("")
                     urls.append("")
                 
                 progress_bar.progress((index + 1) / total_rows)
+            
+            status_text.empty()
+            progress_bar.empty()
+            
+            df["Name"] = names
+            df["Bill Description"] = descriptions
+            df["Bill URL"] = urls
+            
+            st.session_state.processed_df = df
+            st.session_state.processed_csv_bytes = df.to_csv(index=False).encode('utf-8')
+            st.success("Processing complete!")
+
+        if st.session_state.processed_df is not None:
+            st.write("### Processed Data Preview")
+            st.dataframe(st.session_state.processed_df)
+            
+            st.download_button(
+                label="Download Processed CSV",
+                data=st.session_state.processed_csv_bytes,
+                file_name="processed_congress_votes.csv",
+                mime="text/csv",
+                key="download_button_instance"
+            )
