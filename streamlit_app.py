@@ -44,7 +44,7 @@ def get_description_from_web_url_bill(web_url):
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://api.congress.gov/v3/bill/{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -55,7 +55,9 @@ def get_description_from_web_url_bill(web_url):
         summaries_list = data.get("summaries", [])
         
         if summaries_list:
-            return summaries_list[0].get("text", "No summary text found.")
+            if isinstance(summaries_list, list):
+                return summaries_list[0].get("text", "No summary text found.")
+            return summaries_list.get("text", "No summary text found.")
         else:
             return "No summaries available for this bill yet."
         
@@ -85,7 +87,7 @@ def get_description_from_web_url_amendment(web_url):
     else:
         api_type = f"{raw_type.lower()}amdt"
 
-    api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
+    api_url = f"https://api.congress.gov/v3/amendment/{congress_num}/{api_type}/{amendment_num}"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -99,7 +101,7 @@ def get_description_from_web_url_amendment(web_url):
         return f"API Request failed: {e}"
     
 def get_bill_name(type, congress, session, rollCallVoteNumber):
-    base_url = "https://congress.gov"
+    base_url = "https://api.congress.gov/v3"
     url = f"{base_url}/{type}/{congress}/{session}/{rollCallVoteNumber}?format=json&api_key={token}"
     headers = {"Accept": "application/json"}
 
@@ -132,7 +134,7 @@ def get_bill_name(type, congress, session, rollCallVoteNumber):
         st.write(data)
 
 def get_bill_summary(congress, bill_type, bill_number, api_key):
-    base_url = "https://congress.gov/bill"
+    base_url = "https://api.congress.gov/v3/bill"
     url = f"{base_url}/{congress}/{bill_type}/{bill_number}/summaries?format=json&api_key={api_key}"
     headers = {"Accept": "application/json"}
     
@@ -147,7 +149,9 @@ def parse_vote_url(url_string):
     parts = clean_url.split('/')
     try:
         idx = parts.index("votes")
-        vote_type = parts[idx + 1] + "-vote"  
+        vote_type = parts[idx + 1]
+        if not vote_type.endswith("-vote"):
+            vote_type = vote_type + "-vote"
         congress_session = parts[idx + 2]     
         vote_num = parts[idx + 3]             
         
