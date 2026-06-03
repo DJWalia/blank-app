@@ -72,7 +72,7 @@ def get_description_from_web_url_bill(web_url):
         
         if summaries_list:
             # Grabs the latest available summary text
-            return summaries_list[0].get("text", "No summary text found.")
+            return summaries_list.get("text", "No summary text found.")
         else:
             return "No summaries available for this bill yet."
         
@@ -243,42 +243,22 @@ if uploaded_file is not None:
                 
                 if parsed:
                     v_type, v_congress, v_session, v_num = parsed
-                    # Calls your original get_bill_name function exactly as written
-                    bill_name, bill_desc, api_bill_url = get_bill_name(v_type, v_congress, v_session, v_num)
-                    
-                    names.append(bill_name)
-                    descriptions.append(bill_desc)
-                    urls.append(api_bill_url)
+                    try:
+                        # Safety block prevents non-JSON responses or API faults from crashing the script
+                        bill_name, bill_desc, api_bill_url = get_bill_name(v_type, v_congress, v_session, v_num)
+                        
+                        names.append(bill_name if bill_name else "")
+                        descriptions.append(bill_desc if bill_desc else "")
+                        urls.append(api_bill_url if api_bill_url else "")
+                    except Exception:
+                        # Omit content entirely on broken link instances as requested
+                        names.append("")
+                        descriptions.append("")
+                        urls.append("")
                 else:
-                    # Handles invalid patterns or completely empty fields in a row that wasn't entirely blank
+                    # Omit text if the field is missing/malformed but the row itself wasn't completely blank
                     names.append("")
                     descriptions.append("")
                     urls.append("")
                 
                 progress_bar.progress((index + 1) / total_rows)
-            
-            status_text.empty()
-            progress_bar.empty()
-            
-            # Map elements into new columns using your explicitly requested header names
-            df["Name"] = names
-            df["Bill Description"] = descriptions
-            df["Bill URL"] = urls
-            
-            # Save final results to session state
-            st.session_state.processed_df = df
-            st.session_state.processed_csv_bytes = df.to_csv(index=False).encode('utf-8')
-            st.success("Processing complete!")
-
-        # Display preview and download options using stored variables
-        if st.session_state.processed_df is not None:
-            st.write("### Processed Data Preview")
-            st.dataframe(st.session_state.processed_df)
-            
-            st.download_button(
-                label="Download Processed CSV",
-                data=st.session_state.processed_csv_bytes,
-                file_name="processed_congress_votes.csv",
-                mime="text/csv",
-                key="download_button_instance"
-            )
