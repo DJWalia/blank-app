@@ -8,6 +8,7 @@ import re
 import pandas
 
 token = st.secrets["api_token"]
+
 uploaded_file = st.file_uploader("Upload your CSV spreadsheet file from congress.gov", type=["csv"])
 
 def cleanup_text(html_text):
@@ -21,9 +22,28 @@ def cleanup_text(html_text):
     clean_text = re.sub(r"<[^>]+>", "", body_content)
     return clean_text.strip()
 
-def get_description_from_api_params(congress_num, api_type, bill_num):
-    api_url = f"https://congress.gov{str(congress_num)}/{str(api_type)}/{str(bill_num)}/summaries"
+def get_description_from_web_url_bill(web_url):
+    clean_url = str(web_url).strip().rstrip('/')
+    parts = clean_url.split('/')
+    try:
+        idx = parts.index("bill")
+        raw_congress = parts[idx + 1]  
+        raw_type = parts[idx + 2]      
+        bill_num = parts[idx + 3]      
+        congress_num = "".join(filter(str.isdigit, raw_congress))
+    except (ValueError, IndexError):
+        return "Error: Invalid Congress.gov bill web URL format."
+    
+    if raw_type in ["house-bill", "hr"]:
+        api_type = "hr"
+    elif raw_type in ["senate-bill", "s"]:
+        api_type = "s"
+    else:
+        api_type = raw_type.replace("-bill", "").replace("-", "").lower()
+
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
+
     try:
         response = requests.get(api_url, params=params)
         response.raise_for_status()
@@ -31,23 +51,40 @@ def get_description_from_api_params(congress_num, api_type, bill_num):
         summaries_list = data.get("summaries", [])
         if summaries_list and isinstance(summaries_list, list) and len(summaries_list) > 0:
             return summaries_list[0].get("text", "No summary text found.")
-        elif isinstance(summaries_list, dict):
-            return summaries_list.get("text", "No summary text found.")
         return "No summaries available for this bill yet."
-    except Exception as e:
-        return f"Bill Info Fetch failed: {e}"
+    except requests.exceptions.RequestException as e:
+        return f"API Request failed: {e}"
+    
+def get_description_from_web_url_amendment(web_url):
+    clean_url = str(web_url).strip().rstrip('/')
+    parts = clean_url.split('/')
+    try:
+        idx = parts.index("amendment")
+        raw_congress = parts[idx + 1]  
+        raw_type = parts[idx + 2]      
+        amendment_num = parts[idx + 3] 
+        congress_num = "".join(filter(str.isdigit, raw_congress))
+    except (ValueError, IndexError):
+        return "Error: Invalid Congress.gov amendment web URL format."
+    
+    if raw_type in ["house-amendment", "hamdt"]:
+        api_type = "hamdt"
+    elif raw_type in ["senate-amendment", "samdt"]:
+        api_type = "samdt"
+    else:
+        api_type = f"{raw_type.lower()}amdt"
 
-def get_amendment_description_from_api_params(congress_num, api_type, amendment_num):
-    api_url = f"https://congress.gov{str(congress_num)}/{str(api_type)}/{str(amendment_num)}"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
     params = {"api_key": token, "format": "json"}
+
     try:
         response = requests.get(api_url, params=params)
         response.raise_for_status()
         data = response.json()
         return data.get("amendment", {}).get("description", "No description found.")
-    except Exception as e:
-        return f"Amendment Fetch failed: {e}"
-
+    except requests.exceptions.RequestException as e:
+        return f"API Request failed: {e}"
+    
 def get_bill_title_direct(congress, api_type, bill_number):
     api_url = f"https://congress.gov{str(congress)}/{str(api_type)}/{str(bill_number)}"
     params = {"api_key": token, "format": "json"}
@@ -59,9 +96,9 @@ def get_bill_title_direct(congress, api_type, bill_number):
     except Exception:
         return f"Bill {str(bill_number).upper()}"
 
-def get_bill_name_house(congress, session, rollCallVoteNumber):
+def get_bill_name(type, congress, session, rollCallVoteNumber):
     base_url = "https://congress.gov"
-    url = f"{base_url}/house-vote/{str(congress)}/{str(session)}/{str(rollCallVoteNumber)}?format=json&api_key={token}"
+    url = f"{base_url}/{type}/{congress}/{session}/{rollCallVoteNumber}?format=json&api_key={token}"
     headers = {"Accept": "application/json"}
     try:
         response = requests.get(url, headers=headers)
@@ -83,53 +120,44 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
                 target_congress = parts[idx+1]
                 target_api_type = parts[idx+2].lower()
                 target_bill_num = parts[idx+3].split('?')[0]
-                
                 if target_api_type == "hr":
                     web_bill_type = "house-bill"
                 elif target_api_type == "s":
                     web_bill_type = "senate-bill"
                 else:
                     web_bill_type = f"{target_api_type}-bill"
-                
                 bill_title = get_bill_title_direct(target_congress, target_api_type, target_bill_num)
-                description = get_description_from_api_params(target_congress, target_api_type, target_bill_num)
+                description = get_description_from_web_url_bill(leg_url)
                 rebuilt_web_url = f"https://congress.gov{target_congress}th-congress/{web_bill_type}/{target_bill_num}"
-                
                 return bill_title, cleanup_text(description), rebuilt_web_url
             except Exception:
                 pass
 
+    bill_number = None
     if vote_start and vote_end:
-        api_bill_type = str(vote_start).lower()
-        if api_bill_type == "house-bill" or api_bill_type == "hr":
-            api_bill_type = "hr"
-            web_bill_type = "house-bill"
-        else:
-            api_bill_type = "s"
-            web_bill_type = "senate-bill"
-            
-        bill_title = get_bill_title_direct(congress, api_bill_type, vote_end)
-        rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_bill_type}/{vote_end}"
-        description = get_description_from_api_params(congress, api_bill_type, vote_end)
-        return bill_title, cleanup_text(description), rebuilt_web_url
-        
-    elif 'amendmentNumber' in vote_obj:
+        bill_number = vote_start + '.' + vote_end
+    
+    if 'amendmentNumber' in vote_obj:
         amendment_start = vote_obj.get('amendmentType')
         amendment_end = vote_obj.get('amendmentNumber')
-        api_amend_type = "hamdt" if "H" in str(amendment_start).upper() else "samdt"
-        web_amend_type = "house-amendment" if "H" in str(amendment_start).upper() else "senate-amendment"
-        rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_amend_type}/{amendment_end}"
-        description = get_amendment_description_from_api_params(congress, api_amend_type, amendment_end)
-        return f"Amendment #{amendment_end}", description, rebuilt_web_url
-        
+        amendment_number = amendment_start + '.' + amendment_end
+        full_bill_number = amendment_number + ' to ' + (bill_number if bill_number else "")
+        final_bill_number = re.sub(r"\bH(?=[A-Z])", "H.", full_bill_number)
+        bill_url = vote_obj.get('legislationUrl')
+        description = get_description_from_web_url_amendment(bill_url)
+        return final_bill_number, description, bill_url
+    elif bill_number:
+        final_bill_number = re.sub(r"\bH(?=[A-Z])", "H.", bill_number)
+        bill_url = vote_obj.get('legislationUrl')
+        description = get_description_from_web_url_bill(bill_url)
+        description_clean = cleanup_text(description)
+        return final_bill_number, description_clean, bill_url
     else:
-        fallback_url = f"https://congress.gov{congress}-{session}/{rollCallVoteNumber}"
-        vote_desc = vote_obj.get('voteDescription') or vote_obj.get('issue') or "House Roll Call Vote Record."
-        return f"House Vote #{rollCallVoteNumber}", cleanup_text(vote_desc), fallback_url
+        return f"House Vote #{rollCallVoteNumber}", "Could not isolate target bill structures.", ""
 
 def get_bill_name_senate_direct(congress, bill_type, bill_number):
     bill_type_clean = str(bill_type).lower()
-    if "house" in bill_type_clean or bill_type_clean == "hr":
+    if bill_type_clean in ["house-bill", "hr"]:
         api_type = "hr"
         web_type = "house-bill"
     else:
@@ -137,20 +165,20 @@ def get_bill_name_senate_direct(congress, bill_type, bill_number):
         web_type = "senate-bill"
     generated_web_url = f"https://congress.gov{str(congress)}th-congress/{web_type}/{str(bill_number)}"
     bill_title = get_bill_title_direct(congress, api_type, bill_number)
-    description = get_description_from_api_params(congress, api_type, bill_number)
+    description = get_description_from_web_url_bill(generated_web_url)
     description_clean = cleanup_text(description)
     return bill_title, description_clean, generated_web_url
 
 def get_amendment_direct(congress, amend_type, amend_number):
     amend_type_clean = str(amend_type).lower()
-    if "house" in amend_type_clean or amend_type_clean == "hamdt":
+    if amend_type_clean in ["house-amendment", "hamdt"]:
         api_type = "hamdt"
         web_type = "house-amendment"
     else:
         api_type = "samdt"
         web_type = "senate-amendment"
     generated_web_url = f"https://congress.gov{str(congress)}th-congress/{web_type}/{str(amend_number)}"
-    description = get_amendment_description_from_api_params(congress, api_type, amend_number)
+    description = get_amendment_description_from_web_url_amendment(generated_web_url)
     return f"Amendment #{amend_number}", description, generated_web_url
 
 @st.cache_data(show_spinner=False)
@@ -158,22 +186,19 @@ def process_congress_csv(file_contents):
     df = pandas.read_csv(io.BytesIO(file_contents), skiprows=3)
     if "URL" not in df.columns:
         return None, "Error: Could not find a 'URL' column. Check formatting."
-        
     names, descriptions, urls = [], [], []
     for index, row in df.iterrows():
         url_val = str(row["URL"]).strip()
         url_val = re.sub(r'https?://(?:www\.)?congress\.gov/?', '', url_val)
-        
         match_vote = re.search(r'votes/house/(\d+)-(\d+)/(\d+)', url_val)
         match_bill = re.search(r'bill/(\d+)[a-z]*-congress/(house-bill|senate-bill|hr|s)/(\d+)', url_val)
         match_amend = re.search(r'amendment/(\d+)[a-z]*-congress/(house-amendment|senate-amendment|hamdt|samdt)/(\d+)', url_val)
-        
         try:
             if match_vote:
                 congress_str = match_vote.group(1)
                 session_str = match_vote.group(2)
                 vote_num_str = match_vote.group(3).split('?')[0]
-                name, desc, b_url = get_bill_name_house(congress_str, session_str, vote_num_str)
+                name, desc, b_url = get_bill_name("house-vote", congress_str, session_str, vote_num_str)
             elif match_bill:
                 congress_str = match_bill.group(1)
                 bill_type_str = match_bill.group(2)
@@ -188,14 +213,14 @@ def process_congress_csv(file_contents):
                 name, desc, b_url = "N/A", "URL format not matching criteria", ""
         except Exception as e:
             name, desc, b_url = "Parsing Error", f"Exception: {str(e)}", ""
-            
         names.append(name)
         descriptions.append(desc)
         urls.append(b_url)
-        
     df["Name"] = names
     df["Description"] = descriptions
-    df["Bill URL"] = urls
+    if "URL" in df.columns:
+        df = df.drop(columns=["URL"])
+    df["URL"] = urls
     return df, "Success"
 
 if uploaded_file is not None:
@@ -208,10 +233,14 @@ if uploaded_file is not None:
     else:
         st.success("Processing complete!")
         st.dataframe(processed_df.head())
+        
         csv_buffer = io.StringIO()
         processed_df.to_csv(csv_buffer, index=False)
         csv_bytes = csv_buffer.getvalue().encode('utf-8')
         
         st.download_button(
             label="📥 Download Appended CSV Spreadsheet",
-            data=csv_bytes,file_name="congress_votes_expanded.csv",mime="text/csv")
+            data=csv_bytes,
+            file_name="congress_votes_expanded.csv",
+            mime="text/csv"
+        )
