@@ -41,10 +41,14 @@ def get_description_from_web_url_bill(web_url):
         api_type = "hr"
     elif raw_type == "senate-bill":
         api_type = "s"
+    elif raw_type == "senate-resolution":
+        api_type = "sres"
+    elif raw_type == "senate-joint-resolution":
+        api_type = "sjres"
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    api_url = f"https://api.congress.gov/v3/bill/{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -87,7 +91,7 @@ def get_description_from_web_url_amendment(web_url):
     else:
         api_type = f"{raw_type.lower()}amdt"
 
-    api_url = f"https://api.congress.gov/v3/amendment/{congress_num}/{api_type}/{amendment_num}"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -134,7 +138,7 @@ def get_bill_name(type, congress, session, rollCallVoteNumber):
         st.write(data)
 
 def get_bill_summary(congress, bill_type, bill_number, api_key):
-    base_url = "https://api.congress.gov/v3/bill"
+    base_url = "https://congress.gov"
     url = f"{base_url}/{congress}/{bill_type}/{bill_number}/summaries?format=json&api_key={api_key}"
     headers = {"Accept": "application/json"}
     
@@ -142,25 +146,67 @@ def get_bill_summary(congress, bill_type, bill_number, api_key):
     data = response.json()
     return data.get("summaries", [])
 
-def parse_vote_url(url_string):
-    if pd.isna(url_string):
-        return None
+def format_senate_bill_name(url_string):
     clean_url = str(url_string).strip().rstrip('/')
     parts = clean_url.split('/')
     try:
-        idx = parts.index("votes")
-        vote_type = parts[idx + 1]
-        if not vote_type.endswith("-vote"):
-            vote_type = vote_type + "-vote"
-        congress_session = parts[idx + 2]     
-        vote_num = parts[idx + 3]             
-        
-        congress, session = congress_session.split('-')
-        return vote_type, congress, session, vote_num
-    except (ValueError, IndexError):
-        return None
+        if "bill" in parts:
+            idx = parts.index("bill")
+        elif "amendment" in parts:
+            idx = parts.index("amendment")
+        else:
+            return "Unknown"
+        raw_type = parts[idx + 2]
+        num = parts[idx + 3]
+        if raw_type == "senate-bill":
+            return f"S.{num}"
+        elif raw_type == "senate-resolution":
+            return f"S.Res.{num}"
+        elif raw_type == "senate-amendment":
+            return f"S.Amdt.{num}"
+        elif raw_type == "senate-joint-resolution":
+            return f"S.J.Res.{num}"
+        return f"{raw_type}.{num}"
+    except Exception:
+        return "Unknown"
 
-st.title("Congress.gov Vote Parser")
+def process_universal_url(url_string):
+    if pd.isna(url_string):
+        return None
+    
+    clean_url = str(url_string).strip().rstrip('/')
+    parts = clean_url.split('/')
+    
+    if "votes" in parts:
+        try:
+            idx = parts.index("votes")
+            vote_type = parts[idx + 1]
+            if not vote_type.endswith("-vote"):
+                vote_type = vote_type + "-vote"
+            congress_session = parts[idx + 2]     
+            vote_num = parts[idx + 3]             
+            congress, session = congress_session.split('-')
+            
+            bill_name, bill_desc, api_bill_url = get_bill_name(vote_type, congress, session, vote_num)
+            return bill_name, bill_desc, api_bill_url
+        except Exception:
+            return "", "", ""
+            
+    elif "bill" in parts or "amendment" in parts:
+        try:
+            bill_name = format_senate_bill_name(url_string)
+            if "amendment" in parts:
+                bill_desc = get_description_from_web_url_amendment(url_string)
+            else:
+                raw_desc = get_description_from_web_url_bill(url_string)
+                bill_desc = cleanup_text(raw_desc)
+            return bill_name, bill_desc, url_string
+        except Exception:
+            return "", "", ""
+            
+    return "", "", ""
+
+st.title("Congress.gov Legislative Parser")
 
 if "current_file_name" not in st.session_state:
     st.session_state.current_file_name = None
@@ -193,19 +239,13 @@ if uploaded_file is not None:
             for index, row in df.reset_index(drop=True).iterrows():
                 status_text.text(f"Processing row {index + 1} of {total_rows}...")
                 url_val = row["URL"]
-                parsed = parse_vote_url(url_val)
                 
-                if parsed:
-                    v_type, v_congress, v_session, v_num = parsed
-                    try:
-                        bill_name, bill_desc, api_bill_url = get_bill_name(v_type, v_congress, v_session, v_num)
-                        names.append(bill_name if bill_name else "")
-                        descriptions.append(bill_desc if bill_desc else "")
-                        urls.append(api_bill_url if api_bill_url else "")
-                    except Exception:
-                        names.append("")
-                        descriptions.append("")
-                        urls.append("")
+                result = process_universal_url(url_val)
+                if result:
+                    b_name, b_desc, b_url = result
+                    names.append(b_name if b_name else "")
+                    descriptions.append(b_desc if b_desc else "")
+                    urls.append(b_url if b_url else "")
                 else:
                     names.append("")
                     descriptions.append("")
