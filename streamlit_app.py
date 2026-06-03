@@ -22,7 +22,7 @@ def cleanup_text(html_text):
     return clean_text.strip()
 
 def get_description_from_api_params(congress_num, api_type, bill_num):
-    api_url = f"https://congress.gov/{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
     try:
         response = requests.get(api_url, params=params)
@@ -39,7 +39,7 @@ def get_description_from_api_params(congress_num, api_type, bill_num):
         return f"Bill Info Fetch failed: {e}"
 
 def get_amendment_description_from_api_params(congress_num, api_type, amendment_num):
-    api_url = f"https://congress.gov/{congress_num}/{api_type}/{amendment_num}"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
     params = {"api_key": token, "format": "json"}
     try:
         response = requests.get(api_url, params=params)
@@ -50,7 +50,7 @@ def get_amendment_description_from_api_params(congress_num, api_type, amendment_
         return f"Amendment Fetch failed: {e}"
 
 def get_bill_title_direct(congress, api_type, bill_number):
-    api_url = f"https://congress.gov/{congress}/{api_type}/{bill_number}"
+    api_url = f"https://congress.gov{congress}/{api_type}/{bill_number}"
     params = {"api_key": token, "format": "json"}
     try:
         response = requests.get(api_url, params=params)
@@ -94,7 +94,7 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
                 
                 bill_title = get_bill_title_direct(target_congress, target_api_type, target_bill_num)
                 description = get_description_from_api_params(target_congress, target_api_type, target_bill_num)
-                rebuilt_web_url = f"https://congress.gov/{target_congress}th-congress/{web_bill_type}/{target_bill_num}"
+                rebuilt_web_url = f"https://congress.gov{target_congress}th-congress/{web_bill_type}/{target_bill_num}"
                 
                 return bill_title, cleanup_text(description), rebuilt_web_url
             except Exception:
@@ -110,7 +110,7 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
             web_bill_type = "senate-bill"
             
         bill_title = get_bill_title_direct(congress, api_bill_type, vote_end)
-        rebuilt_web_url = f"https://congress.gov/{congress}th-congress/{web_bill_type}/{vote_end}"
+        rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_bill_type}/{vote_end}"
         description = get_description_from_api_params(congress, api_bill_type, vote_end)
         return bill_title, cleanup_text(description), rebuilt_web_url
         
@@ -124,7 +124,7 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
         return f"Amendment #{amendment_end}", description, rebuilt_web_url
         
     else:
-        fallback_url = f"https://congress.gov/{congress}-{session}/{rollCallVoteNumber}"
+        fallback_url = f"https://congress.gov{congress}-{session}/{rollCallVoteNumber}"
         vote_desc = vote_obj.get('voteDescription') or vote_obj.get('issue') or "House Roll Call Vote Record."
         return f"House Vote #{rollCallVoteNumber}", cleanup_text(vote_desc), fallback_url
 
@@ -136,7 +136,7 @@ def get_bill_name_senate_direct(congress, bill_type, bill_number):
     else:
         api_type = "s"
         web_type = "senate-bill"
-    generated_web_url = f"https://congress.gov/{congress}th-congress/{web_type}/{bill_number}"
+    generated_web_url = f"https://congress.gov{congress}th-congress/{web_type}/{bill_number}"
     bill_title = get_bill_title_direct(congress, api_type, bill_number)
     description = get_description_from_api_params(congress, api_type, bill_number)
     description_clean = cleanup_text(description)
@@ -150,7 +150,7 @@ def get_amendment_direct(congress, amend_type, amend_number):
     else:
         api_type = "samdt"
         web_type = "senate-amendment"
-    generated_web_url = f"https://congress.gov/{congress}th-congress/{web_type}/{amend_number}"
+    generated_web_url = f"https://congress.gov{congress}th-congress/{web_type}/{amend_number}"
     description = get_amendment_description_from_api_params(congress, api_type, amend_number)
     return f"Amendment #{amend_number}", description, generated_web_url
 
