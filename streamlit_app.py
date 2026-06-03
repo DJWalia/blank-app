@@ -43,7 +43,7 @@ def get_description_from_web_url_bill(web_url):
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov/{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -53,8 +53,9 @@ def get_description_from_web_url_bill(web_url):
         summaries_list = data.get("summaries", [])
         
         if summaries_list:
-            # Safer extraction fix for list of summary blocks
-            return summaries_list[0].get("text", "No summary text found.")
+            if isinstance(summaries_list, list):
+                return summaries_list[0].get("text", "No summary text found.")
+            return summaries_list.get("text", "No summary text found.")
         else:
             return "No summaries available for this bill yet."
     except requests.exceptions.RequestException as e:
@@ -92,7 +93,7 @@ def get_description_from_web_url_amendment(web_url):
         return f"API Request failed: {e}"
     
 def get_bill_name_house(type, congress, session, rollCallVoteNumber):
-    base_url = "https://api.congress.gov/v3"
+    base_url = "https://congress.gov"
     url = f"{base_url}/house-vote/{str(congress)}/{str(session)}/{str(rollCallVoteNumber)}?format=json&api_key={token}"
     
     headers = {"Accept": "application/json"}
@@ -131,9 +132,6 @@ def get_bill_name_house(type, congress, session, rollCallVoteNumber):
         return f"House Vote #{rollCallVoteNumber}", "Could not isolate target bill components.", ""
 
 def get_bill_name_senate_direct(congress, bill_type, bill_number):
-    """
-    Direct handler for bill URLs like /bill/119th-congress/senate-bill/4664
-    """
     if "house" in bill_type:
         api_type = "hr"
         display_prefix = "H.R."
@@ -144,82 +142,89 @@ def get_bill_name_senate_direct(congress, bill_type, bill_number):
         api_type = "s"
         display_prefix = "S."
 
-    # Reconstruct the tracking layout endpoint directly
-    api_url = f"https://congress.gov{congress}/{api_type}/{bill_number}"
-    generated_web_url = f"https://www.congress.gov/bill/{congress}th-congress/{bill_type}/{bill_number}"
-    
-    # Query summary data blocks
+    generated_web_url = f"https://congress.gov/{congress}th-congress/{bill_type}/{bill_number}"
     description = get_description_from_web_url_bill(generated_web_url)
     description_clean = cleanup_text(description)
     
     return f"{display_prefix} {bill_number}", description_clean, generated_web_url
 
-# Main Runtime Streamlit Code Block
-if uploaded_file is not None:
-    df = pandas.read_csv(uploaded_file, skiprows=3)
+# Cache data ensures processing runs exactly once per distinct file upload
+@st.cache_data(show_spinner=False)
+def process_congress_csv(file_contents):
+    # Convert file bytes back into a DataFrame
+    df = pandas.read_csv(io.BytesIO(file_contents), skiprows=3)
     
     if "URL" not in df.columns:
-        st.error("Error: Could not find a 'URL' column. Check formatting.")
-    else:
-        names, descriptions, urls = [], [], []
+        return None, "Error: Could not find a 'URL' column. Check formatting."
         
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        total_rows = len(df)
+    names, descriptions, urls = [], [], []
+    total_rows = len(df)
+    
+    # Simple container updates can break inside cached steps, 
+    # so we run processing calculations silently and cleanly.
+    for index, row in df.iterrows():
+        url_val = str(row["URL"]).strip()
+        parts = url_val.split('/')
         
-        for index, row in df.iterrows():
-            url_val = str(row["URL"]).strip()
-            status_text.text(f"Processing row {index + 1} of {total_rows}...")
-            progress_bar.progress((index + 1) / total_rows)
-            
-            parts = url_val.split('/')
-            
-            try:
-                # 1. Matches modern pattern: /votes/house/118-2/517
-                if "votes" in parts and "house" in parts:
-                    idx = parts.index("house")
-                    hyphen_mix = parts[idx+1] # Returns string structure "118-2"
-                    
-                    if "-" in hyphen_mix:
-                        congress_str, session_str = hyphen_mix.split('-')
-                    else:
-                        congress_str = "".join(filter(str.isdigit, hyphen_mix))
-                        session_str = "1"
-                        
-                    vote_num = parts[idx+2].split('?')[0] # Enforce single flat string
-                    name, desc, b_url = get_bill_name_house("house-vote", congress_str, session_str, vote_num)
-                    
-                # 2. Matches base configuration reference paths: /bill/119th-congress/senate-bill/4664
-                elif "bill" in parts:
-                    idx = parts.index("bill")
-                    congress_str = "".join(filter(str.isdigit, parts[idx+1]))
-                    bill_type_str = parts[idx+2] # returns 'senate-bill'
-                    vote_num = parts[idx+3].split('?')[0] # returns '4664'
-                    
-                    name, desc, b_url = get_bill_name_senate_direct(congress_str, bill_type_str, vote_num)
-                    
-                else:
-                    name, desc, b_url = "N/A", "URL format not matching criteria", ""
-                    
-            except Exception as e:
-                name, desc, b_url = "Parsing Error", f"Exception: {str(e)}", ""
+        try:
+            if "votes" in parts and "house" in parts:
+                idx = parts.index("house")
+                hyphen_mix = parts[idx+1]
                 
-            names.append(name)
-            descriptions.append(desc)
-            urls.append(b_url)
+                if "-" in hyphen_mix:
+                    congress_str, session_str = hyphen_mix.split('-')
+                else:
+                    congress_str = "".join(filter(str.isdigit, hyphen_mix))
+                    session_str = "1"
+                    
+                vote_num = parts[idx+2].split('?')[0]
+                name, desc, b_url = get_bill_name_house("house-vote", congress_str, session_str, vote_num)
+                
+            elif "bill" in parts:
+                idx = parts.index("bill")
+                congress_str = "".join(filter(str.isdigit, parts[idx+1]))
+                bill_type_str = parts[idx+2]
+                vote_num = parts[idx+3].split('?')[0]
+                
+                name, desc, b_url = get_bill_name_senate_direct(congress_str, bill_type_str, vote_num)
+                
+            else:
+                name, desc, b_url = "N/A", "URL format not matching criteria", ""
+                
+        except Exception as e:
+            name, desc, b_url = "Parsing Error", f"Exception: {str(e)}", ""
             
-        df["Name"] = names
-        df["Description"] = descriptions
-        df["URL_Generated"] = urls
+        names.append(name)
+        descriptions.append(desc)
+        urls.append(b_url)
         
-        status_text.text("Processing complete!")
+    df["Name"] = names
+    df["Description"] = descriptions
+    df["URL_Generated"] = urls
+    return df, "Success"
+
+# Execution Logic Core
+if uploaded_file is not None:
+    # Read bytes to pass safely into our cached function engine
+    file_bytes = uploaded_file.read()
+    
+    with st.spinner("Processing document data... (This runs once and will be cached)"):
+        processed_df, status_msg = process_congress_csv(file_bytes)
         
+    if processed_df is None:
+        st.error(status_msg)
+    else:
+        st.success("Processing complete!")
+        st.dataframe(processed_df.head())
+        
+        # Prepare file layout buffers cleanly 
         csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
+        processed_df.to_csv(csv_buffer, index=False)
         csv_bytes = csv_buffer.getvalue().encode('utf-8')
         
+        # Click action now acts instantaneously without re-triggering the loop!
         st.download_button(
-            label="📥 Download CSV",
+            label="📥 Download Appended CSV Spreadsheet",
             data=csv_bytes,
             file_name="congress_votes_expanded.csv",
             mime="text/csv"
