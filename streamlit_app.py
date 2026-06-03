@@ -36,9 +36,9 @@ def get_description_from_web_url_bill(web_url):
     except (ValueError, IndexError):
         return "Error: Invalid Congress.gov bill web URL format."
     
-    if raw_type == "house-bill":
+    if raw_type in ["house-bill", "hr"]:
         api_type = "hr"
-    elif raw_type == "senate-bill":
+    elif raw_type in ["senate-bill", "s"]:
         api_type = "s"
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
@@ -53,6 +53,7 @@ def get_description_from_web_url_bill(web_url):
         summaries_list = data.get("summaries", [])
         
         if summaries_list:
+            # Safer extraction fix for list of summary blocks
             return summaries_list[0].get("text", "No summary text found.")
         else:
             return "No summaries available for this bill yet."
@@ -91,8 +92,7 @@ def get_description_from_web_url_amendment(web_url):
         return f"API Request failed: {e}"
     
 def get_bill_name_house(type, congress, session, rollCallVoteNumber):
-    base_url = "https://congress.gov"
-    # Ensure variables are pure strings and clean out string array formats
+    base_url = "https://api.congress.gov/v3"
     url = f"{base_url}/house-vote/{str(congress)}/{str(session)}/{str(rollCallVoteNumber)}?format=json&api_key={token}"
     
     headers = {"Accept": "application/json"}
@@ -101,13 +101,13 @@ def get_bill_name_house(type, congress, session, rollCallVoteNumber):
         response.raise_for_status()
         data = response.json()
     except Exception as e:
-        return "API Error", f"Failed fetching roll call metadata: {str(e)}", ""
+        return f"House Vote #{rollCallVoteNumber}", f"API Error: Failed fetching metadata: {str(e)}", ""
 
     vote_start = data.get('houseRollCallVote', {}).get('legislationType')
     vote_end = data.get('houseRollCallVote', {}).get('legislationNumber')
     
     if not vote_start or not vote_end:
-        return "Unknown Bill", "Could not isolate metadata from House API object structures.", ""
+        return f"House Vote #{rollCallVoteNumber}", "Could not isolate metadata structure inside API.", ""
 
     bill_number = f"{vote_start}.{vote_end}"
     
@@ -128,19 +128,38 @@ def get_bill_name_house(type, congress, session, rollCallVoteNumber):
         description_clean = cleanup_text(description)
         return final_bill_number, description_clean, bill_url
     else:
-        return "Unknown", "Could not isolate the vote object.", ""
+        return f"House Vote #{rollCallVoteNumber}", "Could not isolate target bill components.", ""
 
-def get_bill_name_senate(type, congress, session, rollCallVoteNumber):
-    # Maps directly to standard LIS Senate index formats
-    base_url = f"https://senate.gov{str(congress)}&session={str(session)}&vote={str(rollCallVoteNumber).zfill(5)}"
-    return f"Senate Vote #{rollCallVoteNumber}", "Senate Roll Call Vote tracked from reference platform index summary.", base_url
+def get_bill_name_senate_direct(congress, bill_type, bill_number):
+    """
+    Direct handler for bill URLs like /bill/119th-congress/senate-bill/4664
+    """
+    if "house" in bill_type:
+        api_type = "hr"
+        display_prefix = "H.R."
+    elif "senate" in bill_type:
+        api_type = "s"
+        display_prefix = "S."
+    else:
+        api_type = "s"
+        display_prefix = "S."
 
-# Execution Cycle
+    # Reconstruct the tracking layout endpoint directly
+    api_url = f"https://congress.gov{congress}/{api_type}/{bill_number}"
+    generated_web_url = f"https://www.congress.gov/bill/{congress}th-congress/{bill_type}/{bill_number}"
+    
+    # Query summary data blocks
+    description = get_description_from_web_url_bill(generated_web_url)
+    description_clean = cleanup_text(description)
+    
+    return f"{display_prefix} {bill_number}", description_clean, generated_web_url
+
+# Main Runtime Streamlit Code Block
 if uploaded_file is not None:
     df = pandas.read_csv(uploaded_file, skiprows=3)
     
     if "URL" not in df.columns:
-        st.error("Error: Could not find a 'URL' column. Please check your Congress.gov export format.")
+        st.error("Error: Could not find a 'URL' column. Check formatting.")
     else:
         names, descriptions, urls = [], [], []
         
@@ -153,37 +172,34 @@ if uploaded_file is not None:
             status_text.text(f"Processing row {index + 1} of {total_rows}...")
             progress_bar.progress((index + 1) / total_rows)
             
-            # Normalizes formatting elements out of url strings
             parts = url_val.split('/')
             
             try:
-                # Handles structural patterns like: /votes/house/119/2/142 or /votes/senate/118/1/45
-                if "house" in parts and "votes" in parts:
+                # 1. Matches modern pattern: /votes/house/118-2/517
+                if "votes" in parts and "house" in parts:
                     idx = parts.index("house")
-                    congress_str = "".join(filter(str.isdigit, parts[idx+1]))
-                    session_str = "".join(filter(str.isdigit, parts[idx+2]))
-                    vote_num = parts[idx+3].split('?')[0] # fix: enforce clean string extract
+                    hyphen_mix = parts[idx+1] # Returns string structure "118-2"
                     
+                    if "-" in hyphen_mix:
+                        congress_str, session_str = hyphen_mix.split('-')
+                    else:
+                        congress_str = "".join(filter(str.isdigit, hyphen_mix))
+                        session_str = "1"
+                        
+                    vote_num = parts[idx+2].split('?')[0] # Enforce single flat string
                     name, desc, b_url = get_bill_name_house("house-vote", congress_str, session_str, vote_num)
                     
-                elif "senate" in parts and "votes" in parts:
-                    idx = parts.index("senate")
+                # 2. Matches base configuration reference paths: /bill/119th-congress/senate-bill/4664
+                elif "bill" in parts:
+                    idx = parts.index("bill")
                     congress_str = "".join(filter(str.isdigit, parts[idx+1]))
-                    session_str = "".join(filter(str.isdigit, parts[idx+2]))
-                    vote_num = parts[idx+3].split('?')[0]
+                    bill_type_str = parts[idx+2] # returns 'senate-bill'
+                    vote_num = parts[idx+3].split('?')[0] # returns '4664'
                     
-                    name, desc, b_url = get_bill_name_senate("senate-vote", congress_str, session_str, vote_num)
-                
-                # Fallback handler for the alternative "/house-vote/..." string format
-                elif "house-vote" in parts:
-                    idx = parts.index("house-vote")
-                    congress_str = "".join(filter(str.isdigit, parts[idx+1]))
-                    session_str = "".join(filter(str.isdigit, parts[idx+2]))
-                    vote_num = parts[idx+3].split('?')[0]
-                    name, desc, b_url = get_bill_name_house("house-vote", congress_str, session_str, vote_num)
+                    name, desc, b_url = get_bill_name_senate_direct(congress_str, bill_type_str, vote_num)
                     
                 else:
-                    name, desc, b_url = "N/A", "URL structure didn't match known House/Senate vote patterns", ""
+                    name, desc, b_url = "N/A", "URL format not matching criteria", ""
                     
             except Exception as e:
                 name, desc, b_url = "Parsing Error", f"Exception: {str(e)}", ""
@@ -197,14 +213,13 @@ if uploaded_file is not None:
         df["URL_Generated"] = urls
         
         status_text.text("Processing complete!")
-        st.dataframe(df.head())
         
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
         csv_bytes = csv_buffer.getvalue().encode('utf-8')
         
         st.download_button(
-            label="📥 Download Appended CSV Spreadsheet",
+            label="📥 Download CSV",
             data=csv_bytes,
             file_name="congress_votes_expanded.csv",
             mime="text/csv"
