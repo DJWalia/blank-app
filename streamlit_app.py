@@ -22,7 +22,6 @@ def cleanup_text(html_text):
     return clean_text.strip()
 
 def get_description_from_web_url_bill(web_url):
-    st.write('hi')
     
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
@@ -206,14 +205,14 @@ def process_universal_url(url_string):
             
     return "", "", ""
 
-st.title("Congress.gov Legislative Parser")
+st.title("Congress.gov Legislative Records")
 
 if "current_file_name" not in st.session_state:
     st.session_state.current_file_name = None
     st.session_state.processed_df = None
     st.session_state.processed_csv_bytes = None
 
-uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+uploaded_file = st.file_uploader("Upload CSV file from congress.gov/member (limited to 5,000 rows per hour)", type=["csv"])
 
 if uploaded_file is not None:
     if st.session_state.current_file_name != uploaded_file.name:
