@@ -31,6 +31,8 @@ def get_description_from_api_params(congress_num, api_type, bill_num):
         summaries_list = data.get("summaries", [])
         if summaries_list and isinstance(summaries_list, list) and len(summaries_list) > 0:
             return summaries_list[0].get("text", "No summary text found.")
+        elif isinstance(summaries_list, dict):
+            return summaries_list.get("text", "No summary text found.")
         return "No summaries available for this bill yet."
     except Exception as e:
         return f"Bill Info Fetch failed: {e}"
@@ -91,7 +93,7 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
                 
                 bill_title = get_bill_title_direct(target_congress, target_api_type, target_bill_num)
                 description = get_description_from_api_params(target_congress, target_api_type, target_bill_num)
-                rebuilt_web_url = f"https://www.congress.gov/bill/{target_congress}th-congress/{web_bill_type}/{target_bill_num}"
+                rebuilt_web_url = f"https://congress.gov{target_congress}th-congress/{web_bill_type}/{target_bill_num}"
                 
                 return bill_title, cleanup_text(description), rebuilt_web_url
             except Exception:
@@ -107,7 +109,7 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
             web_bill_type = "senate-bill"
             
         bill_title = get_bill_title_direct(congress, api_bill_type, vote_end)
-        rebuilt_web_url = f"https://www.congress.gov/bill/{congress}th-congress/{web_bill_type}/{vote_end}"
+        rebuilt_web_url = f"https://congress.gov{congress}th-congress/{web_bill_type}/{vote_end}"
         description = get_description_from_api_params(congress, api_bill_type, vote_end)
         return bill_title, cleanup_text(description), rebuilt_web_url
         
@@ -121,7 +123,7 @@ def get_bill_name_house(congress, session, rollCallVoteNumber):
         return f"Amendment #{amendment_end}", description, rebuilt_web_url
         
     else:
-        fallback_url = f"https://www.congress.gov/votes/house/{congress}-{session}/{rollCallVoteNumber}"
+        fallback_url = f"https://congress.gov{congress}-{session}/{rollCallVoteNumber}"
         vote_desc = vote_obj.get('voteDescription') or vote_obj.get('issue') or "House Roll Call Vote Record."
         return f"House Vote #{rollCallVoteNumber}", cleanup_text(vote_desc), fallback_url
 
@@ -133,7 +135,7 @@ def get_bill_name_senate_direct(congress, bill_type, bill_number):
     else:
         api_type = "s"
         web_type = "senate-bill"
-    generated_web_url = f"https://www.congress.gov/bill/{str(congress)}th-congress/{web_type}/{str(bill_number)}"
+    generated_web_url = f"https://congress.gov{str(congress)}th-congress/{web_type}/{str(bill_number)}"
     bill_title = get_bill_title_direct(congress, api_type, bill_number)
     description = get_description_from_api_params(congress, api_type, bill_number)
     description_clean = cleanup_text(description)
@@ -212,7 +214,4 @@ if uploaded_file is not None:
         
         st.download_button(
             label="📥 Download Appended CSV Spreadsheet",
-            data=csv_bytes,
-            file_name="congress_votes_expanded.csv",
-            mime="text/csv"
-        )
+            data=csv_bytes,file_name="congress_votes_expanded.csv",mime="text/csv")
