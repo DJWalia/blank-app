@@ -208,14 +208,13 @@ if uploaded_file is not None:
     # Read bytes to pass safely into our cached function engine
     file_bytes = uploaded_file.read()
     
-    with st.spinner("Processing document data... (This runs once and will be cached)"):
+    with st.spinner("Processing document data..."):
         processed_df, status_msg = process_congress_csv(file_bytes)
         
     if processed_df is None:
         st.error(status_msg)
     else:
         st.success("Processing complete!")
-        st.dataframe(processed_df.head())
         
         # Prepare file layout buffers cleanly 
         csv_buffer = io.StringIO()
