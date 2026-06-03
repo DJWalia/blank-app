@@ -22,6 +22,7 @@ def cleanup_text(html_text):
     return clean_text.strip()
 
 def get_description_from_web_url_bill(web_url):
+    st.write('hi')
     
     clean_url = str(web_url).strip().rstrip('/')
     parts = clean_url.split('/')
@@ -104,7 +105,7 @@ def get_description_from_web_url_amendment(web_url):
         return f"API Request failed: {e}"
     
 def get_bill_name(type, congress, session, rollCallVoteNumber):
-    base_url = "https://api.congress.gov/v3"
+    base_url = "https://congress.gov"
     url = f"{base_url}/{type}/{congress}/{session}/{rollCallVoteNumber}?format=json&api_key={token}"
     headers = {"Accept": "application/json"}
 
@@ -137,7 +138,7 @@ def get_bill_name(type, congress, session, rollCallVoteNumber):
         st.write(data)
 
 def get_bill_summary(congress, bill_type, bill_number, api_key):
-    base_url = "https://congress.gov"
+    base_url = "https://congress.gov/bill"
     url = f"{base_url}/{congress}/{bill_type}/{bill_number}/summaries?format=json&api_key={api_key}"
     headers = {"Accept": "application/json"}
     
@@ -205,14 +206,14 @@ def process_universal_url(url_string):
             
     return "", "", ""
 
-st.title("Congress.gov Legislative Records")
+st.title("Congress.gov Legislative Parser")
 
 if "current_file_name" not in st.session_state:
     st.session_state.current_file_name = None
     st.session_state.processed_df = None
     st.session_state.processed_csv_bytes = None
 
-uploaded_file = st.file_uploader("Upload CSV file from congress.gov/member (limited to 5,000 rows per hour)", type=["csv"])
+uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
 if uploaded_file is not None:
     if st.session_state.current_file_name != uploaded_file.name:
