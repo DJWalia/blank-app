@@ -37,7 +37,7 @@ def get_description_from_web_url_bill(web_url):
     else:
         api_type = raw_type.replace("-bill", "").replace("-", "").lower()
 
-    api_url = f"https://api.congress.gov/v3/bill/{congress_num}/{api_type}/{bill_num}/summaries"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{bill_num}/summaries"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -71,7 +71,7 @@ def get_description_from_web_url_amendment(web_url):
     else:
         api_type = f"{raw_type.lower()}amdt"
 
-    api_url = f"https://api.congress.gov/v3/amendment/{congress_num}/{api_type}/{amendment_num}"
+    api_url = f"https://congress.gov{congress_num}/{api_type}/{amendment_num}"
     params = {"api_key": token, "format": "json"}
 
     try:
@@ -83,7 +83,7 @@ def get_description_from_web_url_amendment(web_url):
         return f"API Request failed: {e}"
     
 def get_bill_name(type, congress, session, rollCallVoteNumber):
-    base_url = "https://api.congress.gov/v3"
+    base_url = "https://congress.gov"
     url = f"{base_url}/{type}/{congress}/{session}/{rollCallVoteNumber}?format=json&api_key={token}"
     headers = {"Accept": "application/json"}
 
@@ -122,19 +122,20 @@ def get_bill_name(type, congress, session, rollCallVoteNumber):
     else:
         return "Unknown", "Could not isolate vote data structure", ""
 
-# --- NEW FUNCTION TO PARSE CONGRESS.GOV VOTE URLS ---
 def parse_vote_url(url_string):
     """
-    Parses a vote URL like: https://www.congress.gov/votes/house/118-2/513
+    Parses a vote URL like: https://congress.gov
     Returns: type, congress, session, rollCallVoteNumber
     """
+    if pd.isna(url_string):
+        return None
     clean_url = str(url_string).strip().rstrip('/')
     parts = clean_url.split('/')
     try:
         idx = parts.index("votes")
-        vote_type = parts[idx + 1] + "-vote"  # turns "house" into "house-vote"
-        congress_session = parts[idx + 2]     # "118-2"
-        vote_num = parts[idx + 3]             # "513"
+        vote_type = parts[idx + 1] + "-vote"
+        congress_session = parts[idx + 2]
+        vote_num = parts[idx + 3]
         
         congress, session = congress_session.split('-')
         return vote_type, congress, session, vote_num
@@ -144,69 +145,82 @@ def parse_vote_url(url_string):
 # --- STREAMLIT UI ---
 st.title("Congress.gov Vote Parser")
 
-# Step 1: File Uploader
+# Track the filename to clear out old data if a new file gets dropped in
+if "current_file_name" not in st.session_state:
+    st.session_state.current_file_name = None
+    st.session_state.processed_df = None
+    st.session_state.processed_csv_bytes = None
+
 uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
 if uploaded_file is not None:
-    # Read CSV, skipping the first 3 rows as requested
+    # Reset state data if a brand new file is dropped in
+    if st.session_state.current_file_name != uploaded_file.name:
+        st.session_state.current_file_name = uploaded_file.name
+        st.session_state.processed_df = None
+        st.session_state.processed_csv_bytes = None
+
+    # Read CSV, skipping the first 3 rows
     df = pd.read_csv(uploaded_file, skiprows=3)
+    
+    # Drop entirely blank rows so they are completely omitted from processing and output
+    df = df.dropna(how="all")
     
     if "URL" not in df.columns:
         st.error("Error: The CSV does not contain a column named 'URL'.")
     else:
-        st.write("Preview of uploaded data (first 5 rows):")
-        st.dataframe(df.head())
-        
-        # Initialize session state to save processing time and prevent re-runs on download clicks
-        if "processed_csv" not in st.session_state:
-            st.session_state.processed_csv = None
-            st.session_state.is_processed = False
-
-        # Step 2: Trigger Processing via Button Click
-        if st.button("Process URLs"):
+        # Run processing automatically if we don't have cached data yet
+        if st.session_state.processed_df is None:
             names = []
             descriptions = []
             urls = []
             
+            status_text = st.empty()
             progress_bar = st.progress(0)
             total_rows = len(df)
             
-            for index, row in df.iterrows():
+            for index, row in df.reset_index(drop=True).iterrows():
+                status_text.text(f"Processing row {index + 1} of {total_rows}...")
                 url_val = row["URL"]
                 parsed = parse_vote_url(url_val)
                 
                 if parsed:
                     v_type, v_congress, v_session, v_num = parsed
-                    # Query API using extracted route variables
                     bill_name, bill_desc, api_bill_url = get_bill_name(v_type, v_congress, v_session, v_num)
                     
                     names.append(bill_name)
                     descriptions.append(bill_desc)
                     urls.append(api_bill_url)
                 else:
+                    # If URL field is empty or malformed but row isn't fully empty
                     names.append("Error")
-                    descriptions.append("Invalid vote URL pattern found")
+                    descriptions.append("Invalid or missing vote URL pattern")
                     urls.append("")
                 
-                # Update visual loader tracking progress
                 progress_bar.progress((index + 1) / total_rows)
             
-            # Append generated values into columns appended to the right
-            df["Name"] = names
-            df["Description"] = descriptions
-            df["URL_New"] = urls  # Named URL_New to distinguish from existing "URL" field
+            status_text.empty()
+            progress_bar.empty()
             
-            # Store payload string directly inside context cache pipeline safely
-            st.session_state.processed_csv = df.to_csv(index=False).encode('utf-8')
-            st.session_state.is_processed = True
+            # Map items using the newly requested header names
+            df["Name"] = names
+            df["Bill Description"] = descriptions
+            df["Bill URL"] = urls
+            
+            # Cache outputs safely into state structures
+            st.session_state.processed_df = df
+            st.session_state.processed_csv_bytes = df.to_csv(index=False).encode('utf-8')
             st.success("Processing complete!")
 
-        # Step 3: Present Download Element conditionally from saved memory instance
-        if st.session_state.is_processed and st.session_state.processed_csv is not None:
+        # Render preview and download options using stored variables
+        if st.session_state.processed_df is not None:
+            st.write("### Processed Data Preview")
+            st.dataframe(st.session_state.processed_df)
+            
             st.download_button(
                 label="Download Processed CSV",
-                data=st.session_state.processed_csv,
+                data=st.session_state.processed_csv_bytes,
                 file_name="processed_congress_votes.csv",
                 mime="text/csv",
-                key="download_button_instance" # Static key explicitly locks down accidental loop reruns
+                key="download_button_instance"
             )
