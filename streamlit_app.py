@@ -304,15 +304,29 @@ def fetch_historical_metadata(year, vote_number):
                 nom_node.findtext("nomination_description") or v_question
             ).strip()
 
+        return bill_id, bill_link, bill_title, v_date
+
         bill_link = "N/A"
-        if bill_id != "N/A" and ("H.R." in bill_id or "S." in bill_id):
+        if bill_id != "N/A":
             clean_id = bill_id.replace(" ", "").replace(".", "").lower()
-            type_slug = (
-                "house-bill" if "hr" in clean_id else "senate-bill"
-            )
+        
+        # Check for regular bills
+        if "hr" in clean_id or "s" in clean_id:
+            type_slug = "house-bill" if "hr" in clean_id else "senate-bill"
             num_only = clean_id.replace("hr", "").replace("s", "")
             bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
-
+            
+        # Check for amendments
+        elif "hamdt" in clean_id or "samdt" in clean_id:
+            type_slug = "house-amendment" if "hamdt" in clean_id else "senate-amendment"
+            num_only = clean_id.replace("hamdt", "").replace("samdt", "")
+            bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
+            
+        # Check for nominations (PN numbers)
+        elif "pn" in clean_id:
+            num_only = clean_id.replace("pn", "")
+            bill_link = f"https://congress.gov{congress_num}th-congress/{num_only}"
+            
         return bill_id, bill_link, bill_title, v_date
     except Exception:
         return "N/A", "N/A", f"Roll Call #{vote_number} ({year})", "N/A"
