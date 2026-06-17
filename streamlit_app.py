@@ -290,11 +290,11 @@ def fetch_historical_metadata(year, vote_number):
         if amdt_node is not None and amdt_node.findtext("amendment_number"):
             bill_id = (amdt_node.findtext("amendment_number") or "Amendment").strip()
             
-            # --- REPLACE YOUR OLD bill_title LINE WITH THIS CASCADING FALLBACK ---
+            # Extracts from the direct Senate XML purpose or general vote title tags
             bill_title = (
-                amdt_node.findtext("purpose") or 
-                amdt_node.findtext("statement_of_purpose") or 
-                amdt_node.findtext("amendment_to_amendment_purpose") or 
+                amdt_node.findtext("amendment_purpose") or 
+                root.findtext("vote_title") or 
+                root.findtext("vote_question") or 
                 v_question
             ).strip()
             
