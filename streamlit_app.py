@@ -289,7 +289,14 @@ def fetch_historical_metadata(year, vote_number):
     # 1. PRIORITY Check for Amendment nodes first (even if document node exists)
         if amdt_node is not None and amdt_node.findtext("amendment_number"):
             bill_id = (amdt_node.findtext("amendment_number") or "Amendment").strip()
-            bill_title = (amdt_node.findtext("statement_of_purpose") or v_question).strip()
+            
+            # --- REPLACE YOUR OLD bill_title LINE WITH THIS CASCADING FALLBACK ---
+            bill_title = (
+                amdt_node.findtext("purpose") or 
+                amdt_node.findtext("statement_of_purpose") or 
+                amdt_node.findtext("amendment_to_amendment_purpose") or 
+                v_question
+            ).strip()
             
         # 2. Check Document node for Bills OR Nominations
         elif doc_node is not None:
