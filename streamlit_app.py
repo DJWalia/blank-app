@@ -311,12 +311,12 @@ def fetch_historical_metadata(year, vote_number):
         if "samdt" in clean_id or "hamdt" in clean_id:
             type_slug = "senate-amendment" if "samdt" in clean_id else "house-amendment"
             num_only = "".join(filter(str.isdigit, clean_id))
-            bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
+            bill_link = f"https://congress.gov/{congress_num}th-congress/{type_slug}/{num_only}"
             
         # Build Nomination Link (PN)
         elif "pn" in clean_id or (doc_node is not None and doc_node.findtext("document_type") == "PN"):
             num_only = "".join(filter(str.isdigit, clean_id))
-            bill_link = f"https://congress.gov{congress_num}th-congress/{num_only}"
+            bill_link = f"https://congress.gov/{congress_num}th-congress/{num_only}"
             
         # Build Regular Bill Link
         elif "s" in clean_id or "hr" in clean_id:
