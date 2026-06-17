@@ -310,24 +310,26 @@ def fetch_historical_metadata(year, vote_number):
         if bill_id != "N/A":
             clean_id = bill_id.replace(" ", "").replace(".", "").lower()
         
-        # Check for regular bills
-        if "hr" in clean_id or "s" in clean_id:
-            type_slug = "house-bill" if "hr" in clean_id else "senate-bill"
-            num_only = clean_id.replace("hr", "").replace("s", "")
-            bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
-            
-        # Check for amendments
-        elif "hamdt" in clean_id or "samdt" in clean_id:
+        # 1. Check for amendments FIRST (so "s" in "samdt" doesn't trigger the bill logic)
+        if "hamdt" in clean_id or "samdt" in clean_id:
             type_slug = "house-amendment" if "hamdt" in clean_id else "senate-amendment"
             num_only = clean_id.replace("hamdt", "").replace("samdt", "")
             bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
             
-        # Check for nominations (PN numbers)
-        elif "pn" in clean_id:
-            num_only = clean_id.replace("pn", "")
+        # 2. Check for nominations (PN numbers)
+        elif "pn" in clean_id or nom_node is not None:
+            # Strip out letters to isolate the pure nomination number
+            num_only = "".join(filter(str.isdigit, clean_id))
             bill_link = f"https://congress.gov{congress_num}th-congress/{num_only}"
             
+        # 3. Check for regular bills LAST
+        elif "hr" in clean_id or "s" in clean_id:
+            type_slug = "house-bill" if "hr" in clean_id else "senate-bill"
+            num_only = clean_id.replace("hr", "").replace("s", "")
+            bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
+            
         return bill_id, bill_link, bill_title, v_date
+
     except Exception:
         return "N/A", "N/A", f"Roll Call #{vote_number} ({year})", "N/A"
 
