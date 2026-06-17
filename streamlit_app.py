@@ -283,50 +283,46 @@ def fetch_historical_metadata(year, vote_number):
         doc_node = root.find("document")
         amdt_node = root.find("amendment")
         nom_node = root.find("nomination")
-
+        
         bill_id, bill_title = "N/A", v_question
-
-        if doc_node is not None:
+    
+    # 1. PRIORITY Check for Amendment nodes first (even if document node exists)
+        if amdt_node is not None and amdt_node.findtext("amendment_number"):
+            bill_id = (amdt_node.findtext("amendment_number") or "Amendment").strip()
+            bill_title = (amdt_node.findtext("statement_of_purpose") or v_question).strip()
+            
+        # 2. Check Document node for Bills OR Nominations
+        elif doc_node is not None:
+            doc_type = (doc_node.findtext("document_type") or "").strip().upper()
             bill_id = (doc_node.findtext("document_name") or "N/A").strip()
             bill_title = (doc_node.findtext("document_title") or v_question).strip()
-        elif amdt_node is not None:
-            bill_id = (
-                amdt_node.findtext("amendment_number") or "Amendment"
-            ).strip()
-            bill_title = (
-                amdt_node.findtext("statement_of_purpose") or v_question
-            ).strip()
+            
+        # 3. Fallback to Nomination node if explicitly present
         elif nom_node is not None:
-            bill_id = (
-                nom_node.findtext("nomination_number") or "Nomination"
-            ).strip()
-            bill_title = (
-                nom_node.findtext("nomination_description") or v_question
-            ).strip()
-
-        return bill_id, bill_link, bill_title, v_date
-
+            bill_id = (nom_node.findtext("nomination_number") or "Nomination").strip()
+            bill_title = (nom_node.findtext("nomination_description") or v_question).strip()
+    
+        # --- URL Generation Logic ---
         bill_link = "N/A"
         if bill_id != "N/A":
             clean_id = bill_id.replace(" ", "").replace(".", "").lower()
-        
-        # 1. Check for amendments FIRST (so "s" in "samdt" doesn't trigger the bill logic)
-        if "hamdt" in clean_id or "samdt" in clean_id:
-            type_slug = "house-amendment" if "hamdt" in clean_id else "senate-amendment"
-            num_only = clean_id.replace("hamdt", "").replace("samdt", "")
+            
+            # Build Amendment Link
+        if "samdt" in clean_id or "hamdt" in clean_id:
+            type_slug = "senate-amendment" if "samdt" in clean_id else "house-amendment"
+            num_only = "".join(filter(str.isdigit, clean_id))
             bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
             
-        # 2. Check for nominations (PN numbers)
-        elif "pn" in clean_id or nom_node is not None:
-            # Strip out letters to isolate the pure nomination number
+        # Build Nomination Link (PN)
+        elif "pn" in clean_id or (doc_node is not None and doc_node.findtext("document_type") == "PN"):
             num_only = "".join(filter(str.isdigit, clean_id))
             bill_link = f"https://congress.gov{congress_num}th-congress/{num_only}"
             
-        # 3. Check for regular bills LAST
-        elif "hr" in clean_id or "s" in clean_id:
-            type_slug = "house-bill" if "hr" in clean_id else "senate-bill"
-            num_only = clean_id.replace("hr", "").replace("s", "")
-            bill_link = f"https://congress.gov{congress_num}th-congress/{type_slug}/{num_only}"
+        # Build Regular Bill Link
+        elif "s" in clean_id or "hr" in clean_id:
+            type_slug = "senate-bill" if clean_id.startswith("s") else "house-bill"
+            num_only = "".join(filter(str.isdigit, clean_id))
+            bill_link = f"https://www.congress.gov/bill/{congress_num}th-congress/{type_slug}/{num_only}"
             
         return bill_id, bill_link, bill_title, v_date
 
