@@ -6,6 +6,10 @@ import streamlit as st
 import requests
 import re
 import pandas as pd
+import random
+import time
+import datetime
+import xml.etree.ElementTree as ET
 
 token = st.secrets["api_token"]
 
@@ -47,6 +51,8 @@ def get_description_from_web_url_bill(web_url):
     params = {"api_key": token, "format": "json"}
 
     try:
+        jitter = random.uniform(1.0, 3.0)
+        time.sleep(jitter)
         response = requests.get(api_url, params=params)
         response.raise_for_status()
         
@@ -89,6 +95,8 @@ def get_description_from_web_url_amendment(web_url):
     params = {"api_key": token, "format": "json"}
 
     try:
+        jitter = random.uniform(1.0, 3.0)
+        time.sleep(jitter)
         response = requests.get(api_url, params=params)
         response.raise_for_status()
         
@@ -103,14 +111,21 @@ def get_bill_name(type, congress, session, rollCallVoteNumber):
     url = f"{base_url}/{type}/{congress}/{session}/{rollCallVoteNumber}?format=json&api_key={token}"
     headers = {"Accept": "application/json"}
 
-    response = requests.get(url, headers=headers)
-    data = response.json()
-    st.write(url)
-    st.write(data)
-    vote_start = data.get('houseRollCallVote',{}).get('legislationType')
-    vote_end = data.get('houseRollCallVote',{}).get('legislationNumber')
-    bill_number = vote_start+'.'+vote_end
-    
+    try:
+        jitter = random.uniform(1.0, 3.0)
+        time.sleep(jitter)
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        st.write(url)
+        st.write(data)
+        vote_start = data.get('houseRollCallVote',{}).get('legislationType')
+        vote_end = data.get('houseRollCallVote',{}).get('legislationNumber')
+        bill_number = vote_start+'.'+vote_end
+        
+    except requests.exceptions.RequestException as e:
+        bill_number = "N/A"
+        return f"API Request failed: {e}"
+        
     if 'amendmentNumber' in data.get('houseRollCallVote', {}):
         amendment_start = data.get('houseRollCallVote',{}).get('amendmentType')
         amendment_end = data.get('houseRollCallVote',{}).get('amendmentNumber')
@@ -136,17 +151,24 @@ def get_bill_summary(congress, bill_type, bill_number, api_key):
     base_url = "https://api.congress.gov/v3/bill"
     url = f"{base_url}/{congress}/{bill_type}/{bill_number}/summaries?format=json&api_key={api_key}"
     headers = {"Accept": "application/json"}
-    
-    response = requests.get(url, headers=headers)
-    data = response.json()
-    st.write(data)
-    return data.get("summaries", [])
+
+    try:
+        jitter = random.uniform(1.0, 3.0)
+        time.sleep(jitter)
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        st.write(data)
+        return data.get("summaries", [])
+
+    except requests.exceptions.RequestException as e:
+        return f"API Request failed: {e}"
 
 def parse_vote_url(url_string):
     if pd.isna(url_string):
         return None
     clean_url = str(url_string).strip().rstrip('/')
     parts = clean_url.split('/')
+    
     try:
         idx = parts.index("votes")
         vote_type = parts[idx + 1]
@@ -154,9 +176,9 @@ def parse_vote_url(url_string):
             vote_type = vote_type + "-vote"
         congress_session = parts[idx + 2]     
         vote_num = parts[idx + 3]             
-        
         congress, session = congress_session.split('-')
         return vote_type, congress, session, vote_num
+        
     except (ValueError, IndexError):
         return None
 
@@ -234,25 +256,15 @@ if uploaded_file is not None:
                 key="download_button_instance"
             )
 
-import datetime
-import xml.etree.ElementTree as ET
-import pandas as pd
-import requests
-import streamlit as st
-
 st.set_page_config(page_title="Vote Data Lookup", layout="wide")
 st.title("CQ Vote Scorecard Details (Senate)")
 
 def calculate_congress_session(year):
-    if year < 1789:
-        return None, None
-
     years_since_start = year - 1789
     congress_num = (years_since_start // 2) + 1
     session_num = 1 if (years_since_start % 2 == 0) else 2
 
     return congress_num, session_num
-
 
 @st.cache_data(show_spinner=False)
 def fetch_historical_metadata(year, vote_number):
@@ -269,6 +281,8 @@ def fetch_historical_metadata(year, vote_number):
     }
 
     try:
+        jitter = random.uniform(1.0, 3.0)
+        time.sleep(jitter)
         response = requests.get(xml_url, headers=headers, timeout=5)
         if (
             response.status_code != 200
